@@ -1,4 +1,4 @@
-// Point.hpp
+// q2/Point.hpp
 #pragma once
 
 struct Point {
@@ -11,6 +11,7 @@ struct Point {
     }
 
     bool operator==(const Point& other) const {
-        return x == other.x && y == other.y;
+        constexpr float EPS = 1e-5;
+        return std::abs(x - other.x) < EPS && std::abs(y - other.y) < EPS;
     }
 };
