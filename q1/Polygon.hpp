@@ -3,4 +3,4 @@
 #include <vector>
 #include "Point.hpp"
 
-double polygon_area(const std::vector<Point>& poly);
+float polygon_area(const std::vector<Point>& poly);

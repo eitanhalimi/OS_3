@@ -20,7 +20,7 @@ int main() {
         iss >> points[i].x >> points[i].y;
     }
     auto hull = convex_hull(points);
-    double area = polygon_area(hull);
+    float area = polygon_area(hull);
     std::cout << area << std::endl;
     return 0;
 }

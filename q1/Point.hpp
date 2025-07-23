@@ -2,7 +2,7 @@
 #pragma once
 
 struct Point {
-    double x, y;
+    float x, y;
     bool operator<(const Point& other) const {
         return x < other.x || (x == other.x && y < other.y);
     }
