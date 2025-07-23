@@ -1,74 +1,61 @@
 // q3/main.cpp
 #include <iostream>
-#include <string>
 #include <sstream>
+#include <string>
 #include <list>
-#include "../q2/ConvexHull.hpp"
-#include "../q2/Polygon.hpp"
+#include <vector>
+#include "../q2/Point.hpp"
+#include "graph.cpp" 
 
-std::string to_lower(const std::string& s) {
-    std::string res = s;
-    std::transform(res.begin(), res.end(), res.begin(),
-                   [](unsigned char c){ return std::tolower(c); });
-    return res;
+// convert "X,Y" to Point
+Point stringToPoint(const std::string& coords) {
+    std::stringstream ss(coords);
+    std::string xs, ys;
+    std::getline(ss, xs, ',');
+    std::getline(ss, ys);
+    float x = std::stof(xs);
+    float y = std::stof(ys);
+    return Point(x, y);
 }
 
-int main()
-{
+int main() {
     std::list<Point> points;
-
     std::string line;
-    while (std::getline(std::cin, line))
-    {
-        std::string cmd;
+    while (std::getline(std::cin, line)) {
         std::istringstream iss(line);
+        std::string cmd;
         iss >> cmd;
-        cmd = to_lower(cmd);
-        float x, y;
-        char c;
 
-        if (cmd == "newgraph")
-        {
+        for (auto& c : cmd) c = std::tolower(c);
+
+        if (cmd == "newgraph") {
             int n;
             iss >> n;
-            points.clear();
-            for (int i = 0 ; i < n ; ++i)
-            {
-                std::cin >> x >> c >> y;
-                points.emplace_back(x, y);
+            std::vector<Point> newPts;
+            for (int i = 0; i < n; ++i) {
+                std::getline(std::cin, line); // קרא שורה של נקודה
+                newPts.push_back(stringToPoint(line));
             }
+            points.clear();
+            newGraph(points, newPts);
         }
-        if (cmd == "newpoint" || cmd == "removepoint")
-        {
+        else if (cmd == "newpoint") {
             std::string coords;
-            iss >> coords; 
-
-            std::stringstream ss(coords);
-            std::string xs, ys;
-            std::getline(ss, xs, ','); 
-            std::getline(ss, ys);   
-
-            float x = std::stof(xs);
-            float y = std::stof(ys);
-
-            if (cmd == "newpoint")
-                points.emplace_back(x, y);
-            else if (cmd == "removepoint")
-                points.remove(Point(x, y));
+            iss >> coords;
+            newPoint(points, stringToPoint(coords));
         }
-
-        if (cmd == "ch")
-        {
-            auto hull = convex_hull(points);
-            float area = polygon_area(hull);
+        else if (cmd == "removepoint") {
+            std::string coords;
+            iss >> coords;
+            removePoint(points, stringToPoint(coords));
+        }
+        else if (cmd == "ch") {
+            float area = calcCH(points);
             std::cout << area << std::endl;
         }
-
-        if (cmd == "quit")
-        {
+        else if (cmd == "quit") {
             break;
         }
     }
-
     return 0;
 }
