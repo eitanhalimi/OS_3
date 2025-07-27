@@ -7,17 +7,6 @@
 #include "../q2/Point.hpp"
 #include "graph.cpp" 
 
-// convert "X,Y" to Point
-Point stringToPoint(const std::string& coords) {
-    std::stringstream ss(coords);
-    std::string xs, ys;
-    std::getline(ss, xs, ',');
-    std::getline(ss, ys);
-    float x = std::stof(xs);
-    float y = std::stof(ys);
-    return Point(x, y);
-}
-
 int main() {
     std::list<Point> points;
     std::string line;
@@ -33,7 +22,7 @@ int main() {
             iss >> n;
             std::vector<Point> newPts;
             for (int i = 0; i < n; ++i) {
-                std::getline(std::cin, line); // קרא שורה של נקודה
+                std::getline(std::cin, line);
                 newPts.push_back(stringToPoint(line));
             }
             points.clear();
