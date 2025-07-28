@@ -10,7 +10,7 @@
 #include "..//q3/graph.hpp"
 
 #define PORT 9034        // the port client will be connecting to
-#define BACKLOG 10   // how many pending connections queue will hold
+#define BACKLOG 10       // how many pending connections queue will hold
 #define MAXDATASIZE 1024 // max number of bytes we can get at once
 
 std::list<Point> points;
@@ -26,21 +26,11 @@ std::string getGraph(std::list<Point> graph)
     return s;
 }
 
-// get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
-
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
-
 int main()
 {
     int server_fd, client_fd;
     struct sockaddr_in address;
-    char buffer[1024];
+    char buffer[MAXDATASIZE];
     socklen_t addrlen = sizeof(address);
 
     // Creating new socket
@@ -80,10 +70,8 @@ int main()
         std::string reply = "Connected to " + std::to_string(PORT) + "\n";
         send(client_fd, reply.c_str(), reply.length(), 0);
 
-        ssize_t valread;
-        std::string partial_cmd;
-
         // commands from client
+        ssize_t valread;
         while ((valread = recv(client_fd, buffer, MAXDATASIZE - 1, 0)) > 0)
         {
             buffer[valread] = '\0';
