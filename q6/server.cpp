@@ -32,80 +32,11 @@ std::string getGraph(std::list<Point> graph)
 void handle_client_input(int client_fd)
 {
     char buffer[MAXDATASIZE];
-    ssize_t valread = recv(client_fd, buffer, MAXDATASIZE - 1, 0);
-    if (valread <= 0)
+
+    while (true)
     {
-        reactor.removeFd(client_fd);
-        close(client_fd);
-        std::cout << "Client disconnected" << std::endl;
-        return;
-    }
-
-    buffer[valread] = '\0';
-    std::string input = buffer;
-
-    std::istringstream iss(input);
-    std::string line;
-    while (std::getline(iss, line))
-    {
-        if (line.empty())
-            continue;
-
-        std::istringstream liness(line);
-        std::string cmd;
-        liness >> cmd;
-        std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
-
-        if (cmd == "newgraph")
-        {
-            int n = 0;
-            liness >> n;
-            std::vector<Point> newPts;
-
-            // get n points from client
-            for (int i = 0; i < n; ++i)
-            {
-                std::string ptline;
-                send(client_fd, "Enter point X,Y:\n", 17, 0);
-                ssize_t read = recv(client_fd, buffer, 1023, 0);
-                if (read <= 0)
-                    break;
-                buffer[read] = '\0';
-                ptline = buffer;
-                ptline.erase(std::remove_if(ptline.begin(), ptline.end(), [](char c)
-                                            { return c == '\n' || c == '\r'; }), // handle linux & windows new lines
-
-                             ptline.end());
-                newPts.push_back(stringToPoint(ptline));
-            }
-            newGraph(points, newPts);
-            std::string reply = "Graph updated\n";
-            send(client_fd, reply.c_str(), reply.length(), 0);
-        }
-        else if (cmd == "newpoint")
-        {
-            std::string coords;
-            liness >> coords;
-            newPoint(points, stringToPoint(coords));
-            std::string reply = "Point added\n";
-            send(client_fd, reply.c_str(), reply.length(), 0);
-        }
-        else if (cmd == "removepoint")
-        {
-            std::string coords;
-            liness >> coords;
-            removePoint(points, stringToPoint(coords));
-            std::string reply = "Point removed\n";
-            send(client_fd, reply.c_str(), reply.length(), 0);
-        }
-        else if (cmd == "ch")
-        {
-            float area = calcCH(points);
-            std::ostringstream oss;
-            oss << area << "\n";
-            send(client_fd, oss.str().c_str(), oss.str().length(), 0);
-        }
-        else if (cmd == "quit")
+        ssize_t valread = recv(client_fd, buffer, MAXDATASIZE - 1, 0);
+        if (valread <= 0)
         {
             reactor.removeFd(client_fd);
             close(client_fd);
@@ -113,11 +44,84 @@ void handle_client_input(int client_fd)
             return;
         }
 
-        // for debug
-        else if (cmd == "getgraph")
+        buffer[valread] = '\0';
+        std::string input = buffer;
+
+        std::istringstream iss(input);
+        std::string line;
+        while (std::getline(iss, line))
         {
-            std::string sGraph = getGraph(points);
-            send(client_fd, sGraph.c_str(), sGraph.length(), 0);
+            if (line.empty())
+                continue;
+
+            std::istringstream liness(line);
+            std::string cmd;
+            liness >> cmd;
+            std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
+
+            if (cmd == "newgraph")
+            {
+                int n = 0;
+                liness >> n;
+                std::vector<Point> newPts;
+
+                // get n points from client
+                for (int i = 0; i < n; ++i)
+                {
+                    std::string ptline;
+                    send(client_fd, "Enter point X,Y:\n", 17, 0);
+                    ssize_t read = recv(client_fd, buffer, 1023, 0);
+                    if (read <= 0)
+                        break;
+                    buffer[read] = '\0';
+                    ptline = buffer;
+                    ptline.erase(std::remove_if(ptline.begin(), ptline.end(), [](char c)
+                                                { return c == '\n' || c == '\r'; }), // handle linux & windows new lines
+
+                                 ptline.end());
+                    newPts.push_back(stringToPoint(ptline));
+                }
+                newGraph(points, newPts);
+                std::string reply = "Graph updated\n";
+                send(client_fd, reply.c_str(), reply.length(), 0);
+            }
+            else if (cmd == "newpoint")
+            {
+                std::string coords;
+                liness >> coords;
+                newPoint(points, stringToPoint(coords));
+                std::string reply = "Point added\n";
+                send(client_fd, reply.c_str(), reply.length(), 0);
+            }
+            else if (cmd == "removepoint")
+            {
+                std::string coords;
+                liness >> coords;
+                removePoint(points, stringToPoint(coords));
+                std::string reply = "Point removed\n";
+                send(client_fd, reply.c_str(), reply.length(), 0);
+            }
+            else if (cmd == "ch")
+            {
+                float area = calcCH(points);
+                std::ostringstream oss;
+                oss << area << "\n";
+                send(client_fd, oss.str().c_str(), oss.str().length(), 0);
+            }
+            else if (cmd == "quit")
+            {
+                reactor.removeFd(client_fd);
+                close(client_fd);
+                std::cout << "Client disconnected" << std::endl;
+                return;
+            }
+
+            // for debug
+            else if (cmd == "getgraph")
+            {
+                std::string sGraph = getGraph(points);
+                send(client_fd, sGraph.c_str(), sGraph.length(), 0);
+            }
         }
     }
 }
