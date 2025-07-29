@@ -1,71 +1,91 @@
-// q5/reactor.cpp
+// // q5/reactor.cpp
 #include "reactor.hpp"
 #include <sys/select.h>
 #include <unistd.h>
 #include <iostream>
 
-Reactor::Reactor() {}
+Reactor::Reactor() = default;
 
-Reactor::~Reactor() {
+Reactor::~Reactor()
+{
     stopReactor();
 }
 
-void Reactor::startReactor() {
+void Reactor::startReactor()
+{
     running = true;
-    thread = std::thread(&Reactor::loop, this);
+    loop(); // runs in calling thread
 }
 
-void Reactor::stopReactor() {
+void Reactor::stopReactor()
+{
     running = false;
-    if (thread.joinable()) thread.join();
 }
 
-int Reactor::addFd(int fd, ReactorFunc func) {
-    if (fd < 0) return -1;
-    handlers[fd] = func;
+int Reactor::addFd(int fd, Handler handler)
+{
+    if (fd < 0)
+        return -1;
+    handlers[fd] = handler;
     return 0;
 }
 
-int Reactor::removeFd(int fd) {
-    if (handlers.count(fd)) {
-        handlers.erase(fd);
-        return 0;
-    }
-    return -1;
+int Reactor::removeFd(int fd)
+{
+    return handlers.erase(fd) > 0 ? 0 : -1;
 }
 
-void Reactor::loop() {
-    while (running) {
+void Reactor::loop()
+{
+    while (running)
+    {
         fd_set readfds;
         FD_ZERO(&readfds);
         int maxfd = -1;
 
-        for (const auto& [fd, func] : handlers) {
+        for (const auto &[fd, _] : handlers)
+        {
             FD_SET(fd, &readfds);
-            if (fd > maxfd) maxfd = fd;
+            if (fd > maxfd)
+                maxfd = fd;
         }
-        if (maxfd < 0) {
-            usleep(10000); // no fds to watch, sleep a bit
+
+        if (maxfd < 0)
+        {
+            usleep(10000); // no active FDs
             continue;
         }
 
-        timeval tv = {1, 0}; // timeout to avoid blocking forever
-        int res = select(maxfd + 1, &readfds, nullptr, nullptr, &tv);
-        if (res < 0) {
+        timeval timeout = {1, 0}; // 1 second
+        int ready = select(maxfd + 1, &readfds, nullptr, nullptr, &timeout);
+
+        if (ready < 0)
+        {
             perror("select");
             continue;
         }
-        if (res == 0) continue; // timeout, loop again
 
-        std::vector<int> ready;
-        for (const auto& [fd, func] : handlers) {
-            if (FD_ISSET(fd, &readfds)) ready.push_back(fd);
+        std::vector<int> ready_fds;
+        for (const auto &[fd, _] : handlers)
+        {
+            if (FD_ISSET(fd, &readfds))
+            {
+                ready_fds.push_back(fd);
+            }
         }
-        for (int fd : ready) {
-            try {
-                handlers[fd](fd);
-            } catch (...) {
-                std::cerr << "Reactor handler exception!\n";
+
+        for (int fd : ready_fds)
+        {
+            try
+            {
+                if (handlers.count(fd))
+                {
+                    handlers.at(fd)(fd);
+                }
+            }
+            catch (...)
+            {
+                std::cerr << "Exception in handler\n";
             }
         }
     }
