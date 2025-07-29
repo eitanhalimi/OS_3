@@ -1,10 +1,10 @@
-// // q5/reactor.cpp
+// q5/reactor.cpp
 #include "reactor.hpp"
 #include <sys/select.h>
 #include <unistd.h>
 #include <iostream>
 
-Reactor::Reactor() = default;
+Reactor::Reactor() {}
 
 Reactor::~Reactor()
 {
@@ -14,25 +14,34 @@ Reactor::~Reactor()
 void Reactor::startReactor()
 {
     running = true;
-    loop(); // runs in calling thread
+    thread = std::thread(&Reactor::loop, this);
 }
 
 void Reactor::stopReactor()
 {
     running = false;
+    if (thread.joinable())
+        thread.join();
 }
 
-int Reactor::addFd(int fd, Handler handler)
+int Reactor::addFd(int fd, ReactorFunc func)
 {
     if (fd < 0)
         return -1;
-    handlers[fd] = handler;
+    std::lock_guard<std::recursive_mutex> lock(handlers_mutex);
+    handlers[fd] = func;
     return 0;
 }
 
 int Reactor::removeFd(int fd)
 {
-    return handlers.erase(fd) > 0 ? 0 : -1;
+    std::lock_guard<std::recursive_mutex> lock(handlers_mutex);
+    if (handlers.count(fd))
+    {
+        handlers.erase(fd);
+        return 0;
+    }
+    return -1;
 }
 
 void Reactor::loop()
@@ -43,49 +52,48 @@ void Reactor::loop()
         FD_ZERO(&readfds);
         int maxfd = -1;
 
-        for (const auto &[fd, _] : handlers)
         {
-            FD_SET(fd, &readfds);
-            if (fd > maxfd)
-                maxfd = fd;
+            std::lock_guard<std::recursive_mutex> lock(handlers_mutex);
+            for (const auto &[fd, func] : handlers)
+            {
+                FD_SET(fd, &readfds);
+                maxfd = std::max(maxfd, fd);
+            }
         }
 
         if (maxfd < 0)
         {
-            usleep(10000); // no active FDs
+            usleep(10000); // no fds to watch, sleep a bit
             continue;
         }
 
-        timeval timeout = {1, 0}; // 1 second
-        int ready = select(maxfd + 1, &readfds, nullptr, nullptr, &timeout);
-
-        if (ready < 0)
+        timeval tv = {1, 0}; // timeout to avoid blocking forever
+        int res = select(maxfd + 1, &readfds, nullptr, nullptr, &tv);
+        if (res < 0)
         {
             perror("select");
             continue;
         }
+        if (res == 0)
+            continue; // timeout, loop again
 
-        std::vector<int> ready_fds;
-        for (const auto &[fd, _] : handlers)
+        // std::vector<int> ready;
+        std::vector<std::pair<int, ReactorFunc>> ready_handlers;
+
         {
-            if (FD_ISSET(fd, &readfds))
-            {
-                ready_fds.push_back(fd);
+            std::lock_guard<std::recursive_mutex> lock(handlers_mutex);
+            for (const auto &[fd, func] : handlers) {
+                if (FD_ISSET(fd, &readfds)) {
+                    ready_handlers.emplace_back(fd, func);
+                }
             }
         }
 
-        for (int fd : ready_fds)
-        {
-            try
-            {
-                if (handlers.count(fd))
-                {
-                    handlers.at(fd)(fd);
-                }
-            }
-            catch (...)
-            {
-                std::cerr << "Exception in handler\n";
+        for (const auto &[fd, func] : ready_handlers) {
+            try {
+                func(fd);
+            } catch (...) {
+                std::cerr << "Reactor handler exception!\n";
             }
         }
     }

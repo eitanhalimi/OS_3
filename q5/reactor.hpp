@@ -1,24 +1,35 @@
-// // q5/reactor.hpp
+// q5/reactor.hpp
 #pragma once
-
 #include <functional>
+#include <thread>
+#include <mutex>
+#include <vector>
+// #include <atomic>
 #include <map>
 
 class Reactor
 {
-public:
-    using Handler = std::function<void(int)>;
-
-    Reactor();
-    ~Reactor();
-
-    void startReactor();        // starts reactor
-    void stopReactor();         // stops reactor
-    int addFd(int fd, Handler); // adds fd to reactor
-    int removeFd(int fd);       // removes fd from reactor
+using ReactorFunc = std::function<void(int)>;
 
 private:
     void loop();
-    bool running = false;
-    std::map<int, Handler> handlers;
+    std::map<int, ReactorFunc> handlers;
+    std::recursive_mutex handlers_mutex;
+    std::thread thread;
+    bool running{false};
+
+public:
+    Reactor();
+    ~Reactor();
+
+    // Disable copy
+    Reactor(const Reactor &) = delete;
+    Reactor &operator=(const Reactor &) = delete;
+
+    void startReactor();
+    void stopReactor();
+
+    // returns 0 on success, -1 on error
+    int addFd(int fd, ReactorFunc func);
+    int removeFd(int fd);
 };
