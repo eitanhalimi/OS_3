@@ -6,28 +6,28 @@ namespace Proactor
 {
 
     // Type of function that handles each client: takes int sockfd
-    using ClientHandler = std::function<void(int)>;
+    using proactorFunc = std::function<void(int)>;
 
     // Starts the proactor: listens on given socket and spawns threads for clients
-    class Server
+    class Proactor
     {
     private:
         void accept_loop();
 
         int sockfd;
-        ClientHandler client_handler;
+        proactorFunc client_handler;
         std::thread acceptor_thread;
         std::atomic<bool> running = false;
 
     public:
-        Server(int listening_fd, ClientHandler handler);
-        ~Server();
+        Proactor(int listening_fd, proactorFunc threadFunc);
+        ~Proactor();
 
         // Starts the accept loop in background
-        void start();
+        void startProactor();
 
         // Stops the proactor loop
-        void stop();
+        void stopProactor();
     };
 
 }

@@ -7,19 +7,19 @@
 
 namespace Proactor {
 
-    Server::Server(int listening_fd, ClientHandler handler)
-        : sockfd(listening_fd), client_handler(std::move(handler)) {}
+    Proactor::Proactor(int listening_fd, proactorFunc threadFunc)
+        : sockfd(listening_fd), client_handler(std::move(threadFunc)) {}
 
-    Server::~Server() {
-        stop(); // make sure we stop the loop on destruction
+    Proactor::~Proactor() {
+        stopProactor(); // make sure we stop the loop on destruction
     }
 
-    void Server::start() {
+    void Proactor::startProactor() {
         running = true;
-        acceptor_thread = std::thread(&Server::accept_loop, this);
+        acceptor_thread = std::thread(&Proactor::accept_loop, this);
     }
 
-    void Server::stop() {
+    void Proactor::stopProactor() {
         if (running) {
             running = false;
             close(sockfd); // force accept() to fail and exit loop
@@ -29,7 +29,7 @@ namespace Proactor {
         }
     }
 
-    void Server::accept_loop() {
+    void Proactor::accept_loop() {
         while (running) {
             int client_fd = accept(sockfd, nullptr, nullptr);
             if (client_fd < 0) {
