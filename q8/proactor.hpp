@@ -1,6 +1,8 @@
+// q8/proactor.hpp
 #pragma once
 #include <thread>
 #include <functional>
+#include <atomic>
 
 namespace Proactor
 {
