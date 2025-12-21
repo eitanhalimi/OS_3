@@ -5,6 +5,7 @@
 #include <list>
 #include <vector>
 #include <algorithm>
+#include <chrono>
 #include <netinet/in.h>
 #include <unistd.h>
 #include "..//q3/graph.hpp"
@@ -49,7 +50,7 @@ void watcher_thread()
     }
 }
 
-void client_thread(int client_fd)
+static void* client_thread(int client_fd)
 {
     // for debug
     std::cout << "Client connected. Thread ID: " << std::this_thread::get_id() << std::endl;
@@ -59,14 +60,13 @@ void client_thread(int client_fd)
     char buffer[MAXDATASIZE];
 
     while (true)
-
     {
         ssize_t valread = recv(client_fd, buffer, MAXDATASIZE - 1, 0);
         if (valread <= 0)
         {
-            close(client_fd);
+            // The proactor library closes the socket after the callback returns.
             std::cout << "Client disconnected" << std::endl;
-            return;
+            return nullptr;
         }
 
         buffer[valread] = '\0';
@@ -97,11 +97,11 @@ void client_thread(int client_fd)
                     ssize_t read = recv(client_fd, buffer, 1023, 0);
                     if (read <= 0)
                         break;
+
                     buffer[read] = '\0';
                     ptline = buffer;
                     ptline.erase(std::remove_if(ptline.begin(), ptline.end(), [](char c)
                                                 { return c == '\n' || c == '\r'; }), // handle linux & windows new lines
-
                                  ptline.end());
                     newPts.push_back(stringToPoint(ptline));
                 }
@@ -152,9 +152,8 @@ void client_thread(int client_fd)
             }
             else if (cmd == "quit")
             {
-                close(client_fd);
                 std::cout << "Client disconnected" << std::endl;
-                return;
+                return nullptr;
             }
 
             // for debug
@@ -167,11 +166,13 @@ void client_thread(int client_fd)
             }
         }
     }
+
+    return nullptr;
 }
 
 int main()
 {
-    // whather that notify if CH crossed 100
+    // watcher that notifies if CH crossed 100
     std::thread(watcher_thread).detach();
 
     int server_fd;
@@ -190,7 +191,7 @@ int main()
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    // Link and listen
+    // Bind and listen
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
         perror("bind failed");
@@ -203,12 +204,21 @@ int main()
     }
     std::cout << "Server listening on port " << PORT << std::endl;
 
-    Proactor::Proactor proactor(server_fd, client_thread);
-    proactor.startProactor();
+    pthread_t proactor = startProactor(server_fd, client_thread);
+    if (!proactor)
+    {
+        std::cerr << "Failed to start proactor" << std::endl;
+        ::close(server_fd);
+        return 1;
+    }
 
     while (true)
     {
         std::this_thread::sleep_for(std::chrono::seconds(60));
     }
+
+    // Unreachable in normal flow, but keep it correct.
+    stopProactor(proactor);
+    ::close(server_fd);
     return 0;
 }

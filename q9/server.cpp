@@ -5,12 +5,16 @@
 #include <list>
 #include <vector>
 #include <algorithm>
-#include <netinet/in.h>
-#include <unistd.h>
-#include "..//q3/graph.hpp"
-#include "..//q8/proactor.hpp"
 #include <mutex>
 #include <thread>
+#include <chrono>
+
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+
+#include "../q3/graph.hpp"
+#include "../q8/proactor.hpp"
 
 #define PORT 9034        // the port client will be connect to
 #define BACKLOG 10       // how many pending connections queue will hold
@@ -21,34 +25,33 @@ std::list<Point> points;
 std::mutex graph_mutex;
 
 // helper, for debug
-std::string getGraph(std::list<Point> graph)
+static std::string getGraph(const std::list<Point>& graph)
 {
     std::string s = "the graph is:\n";
-    for (Point p : graph)
+    for (const Point& p : graph)
     {
         s += "(" + std::to_string(p.x) + "," + std::to_string(p.y) + ")\n";
     }
     return s;
 }
 
-void client_thread(int client_fd)
+static void* client_thread(int client_fd)
 {
     // for debug
     std::cout << "Client connected. Thread ID: " << std::this_thread::get_id() << std::endl;
+
     std::string reply = "Connected to " + std::to_string(PORT) + "\n";
-    send(client_fd, reply.c_str(), reply.length(), 0);
+    ::send(client_fd, reply.c_str(), reply.length(), 0);
 
     char buffer[MAXDATASIZE];
 
     while (true)
-
     {
-        ssize_t valread = recv(client_fd, buffer, MAXDATASIZE - 1, 0);
+        ssize_t valread = ::recv(client_fd, buffer, MAXDATASIZE - 1, 0);
         if (valread <= 0)
         {
-            close(client_fd);
             std::cout << "Client disconnected" << std::endl;
-            return;
+            return nullptr;
         }
 
         buffer[valread] = '\0';
@@ -69,76 +72,99 @@ void client_thread(int client_fd)
             {
                 int n = 0;
                 liness >> n;
+
                 std::vector<Point> newPts;
+                newPts.reserve((n > 0) ? static_cast<size_t>(n) : 0);
 
                 // get n points from client
                 for (int i = 0; i < n; ++i)
                 {
-                    std::string ptline;
-                    send(client_fd, "Enter point X,Y:\n", 17, 0);
-                    ssize_t read = recv(client_fd, buffer, 1023, 0);
-                    if (read <= 0)
-                        break;
-                    buffer[read] = '\0';
-                    ptline = buffer;
-                    ptline.erase(std::remove_if(ptline.begin(), ptline.end(), [](char c)
-                                                { return c == '\n' || c == '\r'; }), // handle linux & windows new lines
+                    ::send(client_fd, "Enter point X,Y:\n", 17, 0);
 
+                    ssize_t read = ::recv(client_fd, buffer, MAXDATASIZE - 1, 0);
+                    if (read <= 0)
+                    {
+                        // client disconnected mid-input
+                        std::cout << "Client disconnected" << std::endl;
+                        return nullptr;
+                    }
+
+                    buffer[read] = '\0';
+                    std::string ptline = buffer;
+
+                    // handle linux & windows new lines
+                    ptline.erase(std::remove_if(ptline.begin(), ptline.end(),
+                                                [](char c) { return c == '\n' || c == '\r'; }),
                                  ptline.end());
+
                     newPts.push_back(stringToPoint(ptline));
                 }
 
-                std::lock_guard<std::mutex> lock(graph_mutex);
-                newGraph(points, newPts);
+                {
+                    std::lock_guard<std::mutex> lock(graph_mutex);
+                    newGraph(points, newPts);
+                }
 
-                std::string reply = "Graph updated\n";
-                send(client_fd, reply.c_str(), reply.length(), 0);
+                const std::string reply = "Graph updated\n";
+                ::send(client_fd, reply.c_str(), reply.length(), 0);
             }
             else if (cmd == "newpoint")
             {
                 std::string coords;
                 liness >> coords;
 
-                std::lock_guard<std::mutex> lock(graph_mutex);
-                newPoint(points, stringToPoint(coords));
+                {
+                    std::lock_guard<std::mutex> lock(graph_mutex);
+                    newPoint(points, stringToPoint(coords));
+                }
 
-                std::string reply = "Point added\n";
-                send(client_fd, reply.c_str(), reply.length(), 0);
+                const std::string reply = "Point added\n";
+                ::send(client_fd, reply.c_str(), reply.length(), 0);
             }
             else if (cmd == "removepoint")
             {
                 std::string coords;
                 liness >> coords;
 
-                std::lock_guard<std::mutex> lock(graph_mutex);
-                removePoint(points, stringToPoint(coords));
+                {
+                    std::lock_guard<std::mutex> lock(graph_mutex);
+                    removePoint(points, stringToPoint(coords));
+                }
 
-                std::string reply = "Point removed\n";
-                send(client_fd, reply.c_str(), reply.length(), 0);
+                const std::string reply = "Point removed\n";
+                ::send(client_fd, reply.c_str(), reply.length(), 0);
             }
             else if (cmd == "ch")
             {
-                std::lock_guard<std::mutex> lock(graph_mutex);
-                float area = calcCH(points);
+                float area = 0.0f;
+                {
+                    std::lock_guard<std::mutex> lock(graph_mutex);
+                    area = calcCH(points);
+                }
 
                 std::ostringstream oss;
                 oss << area << "\n";
-                send(client_fd, oss.str().c_str(), oss.str().length(), 0);
+                ::send(client_fd, oss.str().c_str(), oss.str().length(), 0);
             }
             else if (cmd == "quit")
             {
-                close(client_fd);
                 std::cout << "Client disconnected" << std::endl;
-                return;
+                return nullptr;
             }
-
             // for debug
             else if (cmd == "getgraph")
             {
-                std::lock_guard<std::mutex> lock(graph_mutex);
-                std::string sGraph = getGraph(points);
-
-                send(client_fd, sGraph.c_str(), sGraph.length(), 0);
+                std::string sGraph;
+                {
+                    std::lock_guard<std::mutex> lock(graph_mutex);
+                    sGraph = getGraph(points);
+                }
+                ::send(client_fd, sGraph.c_str(), sGraph.length(), 0);
+            }
+            else
+            {
+                const std::string reply = "Unknown command\n";
+                ::send(client_fd, reply.c_str(), reply.length(), 0);
             }
         }
     }
@@ -147,40 +173,55 @@ void client_thread(int client_fd)
 int main()
 {
     int server_fd;
-    struct sockaddr_in address;
+    struct sockaddr_in address{};
 
     // Creating new socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0)
     {
         perror("socket failed");
-        exit(1);
+        return 1;
     }
+
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    ::setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    // Link and listen
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+    // Bind and listen
+    if (::bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0)
     {
         perror("bind failed");
-        exit(1);
+        ::close(server_fd);
+        return 1;
     }
-    if (listen(server_fd, BACKLOG) < 0)
+    if (::listen(server_fd, BACKLOG) < 0)
     {
         perror("listen");
-        exit(1);
+        ::close(server_fd);
+        return 1;
     }
+
     std::cout << "Server listening on port " << PORT << std::endl;
 
-    Proactor::Proactor proactor(server_fd, client_thread);
-    proactor.startProactor();
+    pthread_t p = startProactor(server_fd, client_thread);
+    if (!p)
+    {
+        std::cerr << "Failed to start proactor\n";
+        ::close(server_fd);
+        return 1;
+    }
 
+    // Keep process alive
     while (true)
     {
         std::this_thread::sleep_for(std::chrono::seconds(60));
     }
+
+    // Unreachable in normal flow, but keep it correct.
+    stopProactor(p);
+    ::close(server_fd);
     return 0;
 }

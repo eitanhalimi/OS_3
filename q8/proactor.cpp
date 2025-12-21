@@ -1,48 +1,118 @@
 // q8/proactor.cpp
 #include "proactor.hpp"
-#include <unistd.h>
-#include <iostream>
-#include <atomic>
-#include <mutex>
+
 #include <sys/socket.h>
+#include <unistd.h>
 
-namespace Proactor {
+#include <atomic>
+#include <cerrno>
+#include <cstring>
+#include <mutex>
+#include <stdexcept>
+#include <thread>
+#include <vector>
 
-    Proactor::Proactor(int listening_fd, proactorFunc threadFunc)
-        : sockfd(listening_fd), client_handler(std::move(threadFunc)) {}
+struct Proactor {
+    int sockfd;
+    proactorFunc callback;
 
-    Proactor::~Proactor() {
-        stopProactor(); // make sure we stop the loop on destruction
-    }
+    std::thread accept_thread;
+    std::atomic<bool> running{false};
 
-    void Proactor::startProactor() {
-        running = true;
-        acceptor_thread = std::thread(&Proactor::accept_loop, this);
-    }
+    std::mutex mtx;
+    std::vector<std::thread> client_threads;
+};
 
-    void Proactor::stopProactor() {
-        if (running) {
-            running = false;
-            close(sockfd); // force accept() to fail and exit loop
-            if (acceptor_thread.joinable()) {
-                acceptor_thread.join();
+static void accept_loop(Proactor* p)
+{
+    p->running.store(true);
+
+    while (p->running.load()) {
+        int client_fd = ::accept(p->sockfd, nullptr, nullptr);
+        if (client_fd < 0) {
+            // If we are stopping, accept may fail due to shutdown().
+            if (!p->running.load()) {
+                break;
             }
-        }
-    }
 
-    void Proactor::accept_loop() {
-        while (running) {
-            int client_fd = accept(sockfd, nullptr, nullptr);
-            if (client_fd < 0) {
-                if (running) {
-                    perror("[Proactor] accept failed");
-                }
+            if (errno == EINTR) {
                 continue;
             }
 
-            // Create detached thread to handle client
-            std::thread(client_handler, client_fd).detach();
+            // For transient errors, just keep looping.
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+
+            // If accept fails for any other reason, keep the proactor alive.
+            // The server can decide to stop it explicitly.
+            continue;
+        }
+
+        // Start a new thread for this client and keep it so we can join on stop().
+        std::thread t([p, client_fd]() {
+            try {
+                if (p->callback) {
+                    p->callback(client_fd);
+                }
+            } catch (...) {
+                // Swallow exceptions to avoid terminating the entire process.
+            }
+
+            // Best-effort close: in our servers the handler usually closes,
+            // but closing here makes the library safer and avoids FD leaks.
+            ::close(client_fd);
+        });
+
+        {
+            std::lock_guard<std::mutex> lock(p->mtx);
+            p->client_threads.push_back(std::move(t));
         }
     }
+}
 
+pthread_t startProactor(int sockfd, proactorFunc threadFunc)
+{
+    if (sockfd < 0 || threadFunc == nullptr) {
+        return 0;
+    }
+
+    auto* p = new Proactor();
+    p->sockfd = sockfd;
+    p->callback = threadFunc;
+
+    p->accept_thread = std::thread(accept_loop, p);
+    return pthread_t(p);
+}
+
+int stopProactor(void* proactor)
+{
+    if (!proactor) return -1;
+
+    auto* p = static_cast<Proactor*>(proactor);
+
+    // Signal accept loop to stop.
+    p->running.store(false);
+
+    // Unblock accept(): shutdown is enough; we do not close the listening socket here
+    // because the server owns it.
+    ::shutdown(p->sockfd, SHUT_RDWR);
+
+    if (p->accept_thread.joinable()) {
+        p->accept_thread.join();
+    }
+
+    // Join all client threads that were created.
+    {
+        std::lock_guard<std::mutex> lock(p->mtx);
+        for (std::thread& t : p->client_threads) {
+            if (t.joinable()) {
+                t.join();
+            }
+        }
+        p->client_threads.clear();
+    }
+
+    delete p;
+    return 0;
 }

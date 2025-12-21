@@ -4,137 +4,249 @@
 #include <string>
 #include <list>
 #include <vector>
+#include <unordered_map>
 #include <algorithm>
+
 #include <netinet/in.h>
 #include <unistd.h>
-#include "..//q3/graph.hpp"
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+#include "../q3/graph.hpp"
 #include "../q5/reactor.hpp"
 
 #define PORT 9034        // the port client will be connecting to
 #define BACKLOG 10       // how many pending connections queue will hold
 #define MAXDATASIZE 1024 // max number of bytes we can get at once
 
-// globals
-// Reactor reactor;
-Reactor* reactor = new Reactor();
-std::list<Point> points;
+// Global graph (shared for all clients)
+static std::list<Point> g_points;
 
-// helper, for debug
-std::string getGraph(std::list<Point> graph)
+// Reactor instance
+static void* g_reactor = nullptr;
+
+// Per-client state to support "newgraph N" followed by N lines of points
+struct ClientState {
+    std::string inbuf;               // accumulated data until we have full lines
+    int expecting_points = 0;        // how many point-lines are still expected
+    std::vector<Point> pending_pts;  // points collected for newgraph
+};
+
+static std::unordered_map<int, ClientState> g_clients;
+
+// helper (debug)
+static std::string getGraphString(const std::list<Point>& graph)
 {
     std::string s = "the graph is:\n";
-    for (Point p : graph)
-    {
+    for (const Point& p : graph) {
         s += "(" + std::to_string(p.x) + "," + std::to_string(p.y) + ")\n";
     }
     return s;
 }
 
-void handle_client_input(int client_fd)
+static void closeClient(int fd)
 {
-    char buffer[MAXDATASIZE];
-    ssize_t valread = recv(client_fd, buffer, MAXDATASIZE - 1, 0);
-    if (valread <= 0)
-    {
-        reactor->removeFd(client_fd);
-        close(client_fd);
-        std::cout << "Client disconnected" << std::endl;
+    removeFdFromReactor(g_reactor, fd);
+    close(fd);
+    g_clients.erase(fd);
+    std::cout << "Client disconnected (fd=" << fd << ")\n";
+}
+
+static void sendStr(int fd, const std::string& s)
+{
+    if (!s.empty()) {
+        (void)send(fd, s.c_str(), s.size(), 0);
+    }
+}
+
+// Trim \r and spaces (simple)
+static void rstrip(std::string& s)
+{
+    while (!s.empty() && (s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) {
+        s.pop_back();
+    }
+}
+
+static void processLine(int fd, std::string line)
+{
+    rstrip(line);
+    if (line.empty()) return;
+
+    ClientState& st = g_clients[fd];
+
+    // If we are currently collecting points for "newgraph N"
+    if (st.expecting_points > 0) {
+        try {
+            Point p = stringToPoint(line);
+            st.pending_pts.push_back(p);
+            st.expecting_points--;
+
+            if (st.expecting_points == 0) {
+                newGraph(g_points, st.pending_pts);
+                st.pending_pts.clear();
+                sendStr(fd, "Graph updated\n");
+            }
+        } catch (...) {
+            // bad point format
+            st.pending_pts.clear();
+            st.expecting_points = 0;
+            sendStr(fd, "Error: invalid point format. Expected X,Y\n");
+        }
         return;
     }
 
-    buffer[valread] = '\0';
-    std::string input = buffer;
+    // Normal command parsing
+    std::istringstream iss(line);
+    std::string cmd;
+    iss >> cmd;
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
 
-    std::istringstream iss(input);
-    std::string line;
-    while (std::getline(iss, line))
-    {
-        if (line.empty())
-            continue;
-
-        std::istringstream liness(line);
-        std::string cmd;
-        liness >> cmd;
-        std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
-
-        if (cmd == "newgraph")
-        {
-            int n = 0;
-            liness >> n;
-            std::vector<Point> newPts;
-
-            // get n points from client
-            for (int i = 0; i < n; ++i)
-            {
-                std::string ptline;
-                send(client_fd, "Enter point X,Y:\n", 17, 0);
-                ssize_t read = recv(client_fd, buffer, 1023, 0);
-                if (read <= 0)
-                    break;
-                buffer[read] = '\0';
-                ptline = buffer;
-                ptline.erase(std::remove_if(ptline.begin(), ptline.end(), [](char c)
-                                            { return c == '\n' || c == '\r'; }), // handle linux & windows new lines
-
-                             ptline.end());
-                newPts.push_back(stringToPoint(ptline));
-            }
-            newGraph(points, newPts);
-            std::string reply = "Graph updated\n";
-            send(client_fd, reply.c_str(), reply.length(), 0);
-        }
-        else if (cmd == "newpoint")
-        {
-            std::string coords;
-            liness >> coords;
-            newPoint(points, stringToPoint(coords));
-            std::string reply = "Point added\n";
-            send(client_fd, reply.c_str(), reply.length(), 0);
-        }
-        else if (cmd == "removepoint")
-        {
-            std::string coords;
-            liness >> coords;
-            removePoint(points, stringToPoint(coords));
-            std::string reply = "Point removed\n";
-            send(client_fd, reply.c_str(), reply.length(), 0);
-        }
-        else if (cmd == "ch")
-        {
-            float area = calcCH(points);
-            std::ostringstream oss;
-            oss << area << "\n";
-            send(client_fd, oss.str().c_str(), oss.str().length(), 0);
-        }
-        else if (cmd == "quit")
-        {
-            reactor->removeFd(client_fd);
-            close(client_fd);
-            std::cout << "Client disconnected" << std::endl;
+    if (cmd == "newgraph") {
+        int n = 0;
+        iss >> n;
+        if (n < 0) {
+            sendStr(fd, "Error: N must be non-negative\n");
             return;
         }
+        st.expecting_points = n;
+        st.pending_pts.clear();
 
-        // for debug
-        else if (cmd == "getgraph")
-        {
-            std::string sGraph = getGraph(points);
-            send(client_fd, sGraph.c_str(), sGraph.length(), 0);
+        if (n == 0) {
+            std::vector<Point> empty;
+            newGraph(g_points, empty);
+            sendStr(fd, "Graph updated\n");
+        } else {
+            // No prompt here! client will just send next N lines.
+            sendStr(fd, "OK: send points as next lines (X,Y)\n");
+        }
+        return;
+    }
+
+    if (cmd == "newpoint") {
+        std::string coords;
+        iss >> coords;
+        if (coords.empty()) {
+            sendStr(fd, "Error: usage newpoint X,Y\n");
+            return;
+        }
+        try {
+            newPoint(g_points, stringToPoint(coords));
+            sendStr(fd, "Point added\n");
+        } catch (...) {
+            sendStr(fd, "Error: invalid point format. Expected X,Y\n");
+        }
+        return;
+    }
+
+    if (cmd == "removepoint") {
+        std::string coords;
+        iss >> coords;
+        if (coords.empty()) {
+            sendStr(fd, "Error: usage removepoint X,Y\n");
+            return;
+        }
+        try {
+            removePoint(g_points, stringToPoint(coords));
+            sendStr(fd, "Point removed\n");
+        } catch (...) {
+            sendStr(fd, "Error: invalid point format. Expected X,Y\n");
+        }
+        return;
+    }
+
+    if (cmd == "ch") {
+        float area = calcCH(g_points);
+        std::ostringstream oss;
+        oss << area << "\n";
+        sendStr(fd, oss.str());
+        return;
+    }
+
+    if (cmd == "getgraph") {
+        sendStr(fd, getGraphString(g_points));
+        return;
+    }
+
+    if (cmd == "quit") {
+        closeClient(fd);
+        return;
+    }
+
+    sendStr(fd, "Error: unknown command\n");
+}
+
+// reactor callback for client fd
+static void* handle_client_input(int client_fd)
+{
+    char buffer[MAXDATASIZE];
+    ssize_t n = recv(client_fd, buffer, MAXDATASIZE - 1, 0);
+
+    if (n <= 0) {
+        closeClient(client_fd);
+        return nullptr;
+    }
+
+    buffer[n] = '\0';
+
+    ClientState& st = g_clients[client_fd];
+    st.inbuf += buffer;
+
+    // Process full lines
+    while (true) {
+        size_t pos = st.inbuf.find('\n');
+        if (pos == std::string::npos) break;
+
+        std::string line = st.inbuf.substr(0, pos);
+        st.inbuf.erase(0, pos + 1);
+
+        processLine(client_fd, line);
+
+        // Client might have been closed inside processLine (quit)
+        if (g_clients.find(client_fd) == g_clients.end()) {
+            break;
         }
     }
+
+    return nullptr;
+}
+
+// reactor callback for server fd: accept new connections
+static void* handle_accept(int server_fd)
+{
+    struct sockaddr_in address;
+    socklen_t addrlen = sizeof(address);
+
+    int client_fd = accept(server_fd, (struct sockaddr*)&address, &addrlen);
+    if (client_fd < 0) {
+        return nullptr;
+    }
+
+    std::cout << "Client connected (fd=" << client_fd << ")\n";
+
+    // init state
+    g_clients[client_fd] = ClientState{};
+
+    // hello message
+    std::string reply = "Connected to " + std::to_string(PORT) + "\n";
+    sendStr(client_fd, reply);
+
+    // register client fd in reactor
+    addFdToReactor(g_reactor, client_fd, handle_client_input);
+    return nullptr;
 }
 
 int main()
 {
-    int server_fd, client_fd;
+    int server_fd;
     struct sockaddr_in address;
-    socklen_t addrlen = sizeof(address);
 
-    // Creating new socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-        perror("socket failed");
-        exit(1);
+    // Create socket
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        return 1;
     }
+
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
@@ -142,32 +254,31 @@ int main()
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    // Link and listen
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
-    {
-        perror("bind failed");
-        exit(1);
+    // bind + listen
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("bind");
+        close(server_fd);
+        return 1;
     }
-    if (listen(server_fd, BACKLOG) < 0)
-    {
+    if (listen(server_fd, BACKLOG) < 0) {
         perror("listen");
-        exit(1);
+        close(server_fd);
+        return 1;
     }
-    std::cout << "Server listening on port " << PORT << std::endl;
-    reactor->startReactor();
 
-    while (true)
-    {
-        if ((client_fd = accept(server_fd, (struct sockaddr *)&address, &addrlen)) < 0)
-        {
-            perror("accept");
-            continue;
-        }
-        std::cout << "Client connected" << std::endl;
-        std::string reply = "Connected to " + std::to_string(PORT) + "\n";
-        send(client_fd, reply.c_str(), reply.length(), 0);
+    std::cout << "Stage 6 server (Reactor) listening on port " << PORT << "\n";
 
-        reactor->addFd(client_fd, handle_client_input);
+    // Start reactor and register server fd for accept
+    g_reactor = startReactor();
+    addFdToReactor(g_reactor, server_fd, handle_accept);
+
+    // Keep main thread alive
+    while (true) {
+        sleep(1);
     }
+
+    // (not reached normally)
+    stopReactor(g_reactor);
+    close(server_fd);
     return 0;
 }
