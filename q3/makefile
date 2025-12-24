@@ -1,10 +1,21 @@
 CXX = g++
-CXXFLAGS = -std=c++11 -Wall -Wextra -O2
+CXXFLAGS = -Wall -std=c++17
 
-all: convex_profiler
+TARGET = main.out
+OBJS = main.o graph.o
 
-convex_profiler: main.cpp
-	$(CXX) $(CXXFLAGS) -o convex_profiler main.cpp
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS)
+
+main.o: main.cpp graph.hpp
+	$(CXX) $(CXXFLAGS) -c main.cpp -o main.o
+
+graph.o: graph.cpp graph.hpp
+	$(CXX) $(CXXFLAGS) -c graph.cpp -o graph.o
 
 clean:
-	rm -f convex_profiler
+	rm -f *.o $(TARGET)
+
+.PHONY: all clean

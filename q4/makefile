@@ -1,20 +1,20 @@
 CXX = g++
 CXXFLAGS = -Wall -Wextra -std=c++11
 
-Q2 = ../q2
-Q3 = ../q3
-Q4 = .
+SERVER_SRCS = server.cpp ../q3/graph.cpp
+CLIENT_SRCS = client.cpp
+SERVER_TARGET = server.out
+CLIENT_TARGET = client.out
 
-SRCS = $(Q4)/server.cpp $(Q3)/graph.cpp
-OBJS = $(SRCS:.cpp=.o)
-TARGET = ch_server.out
+all: $(SERVER_TARGET) $(CLIENT_TARGET)
 
-all: $(TARGET)
+$(SERVER_TARGET): $(SERVER_SRCS)
+	$(CXX) $(CXXFLAGS) $(SERVER_SRCS) -o $(SERVER_TARGET)
 
-$(TARGET): $(SRCS)
-	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET)
+$(CLIENT_TARGET): $(CLIENT_SRCS)
+	$(CXX) $(CXXFLAGS) $(CLIENT_SRCS) -o $(CLIENT_TARGET)
 
 clean:
-	rm -f $(TARGET) $(Q4)/*.o $(Q3)/*.o
+	rm -f $(SERVER_TARGET) $(CLIENT_TARGET) *.o
 
 .PHONY: all clean

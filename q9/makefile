@@ -1,19 +1,34 @@
-# Makefile for q9 multi-threaded server
-
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -pthread
+FLAGS = -Wall -g -std=c++20 -fPIC -pthread
+LIB_TARGET = lib_q8.so
+EXEC_TARGET = server.out
+CLIENT_TARGET = client.out
+GRAPH_OBJ = ../q3/graph.o
 
-SRC = server.cpp ../q3/graph.cpp ../q8/proactor.cpp
-OBJ = $(SRC:.cpp=.o)
-TARGET = server_q9.out
+all: $(LIB_TARGET) $(EXEC_TARGET) $(CLIENT_TARGET)
 
-all: $(TARGET)
+$(LIB_TARGET): reactor.o proactor.o
+	$(CXX) -shared $^ -o $@
 
-$(TARGET): $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+$(EXEC_TARGET): server.o reactor.o proactor.o $(GRAPH_OBJ)
+	$(CXX) $(FLAGS) $^ -o $@
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(CLIENT_TARGET): client.o
+	$(CXX) $(FLAGS) $^ -o $@
+
+reactor.o: reactor.cpp reactor.hpp
+	$(CXX) $(FLAGS) -c $< -o $@
+
+proactor.o: proactor.cpp proactor.hpp
+	$(CXX) $(FLAGS) -c $< -o $@
+
+server.o: server.cpp proactor.hpp ../q3/graph.hpp
+	$(CXX) $(FLAGS) -c $< -o $@
+
+client.o: client.cpp
+	$(CXX) $(FLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f *.o $(LIB_TARGET) $(EXEC_TARGET) $(CLIENT_TARGET) *.out
+
+.PHONY: all clean

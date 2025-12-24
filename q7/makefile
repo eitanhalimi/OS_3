@@ -3,17 +3,25 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -pthread
 
-SRC = server.cpp ../q3/graph.cpp
-OBJ = $(SRC:.cpp=.o)
-TARGET = server_q7.out
+SERVER_SRC = server.cpp ../q3/graph.cpp
+CLIENT_SRC = client.cpp
+SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
+CLIENT_OBJ = $(CLIENT_SRC:.cpp=.o)
+SERVER_TARGET = server.out
+CLIENT_TARGET = client.out
 
-all: $(TARGET)
+all: $(SERVER_TARGET) $(CLIENT_TARGET)
 
-$(TARGET): $(OBJ)
+$(SERVER_TARGET): $(SERVER_OBJ)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(CLIENT_TARGET): $(CLIENT_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f $(SERVER_OBJ) $(CLIENT_OBJ) $(SERVER_TARGET) $(CLIENT_TARGET)
+
+.PHONY: all clean

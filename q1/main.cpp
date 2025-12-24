@@ -10,12 +10,12 @@
 int main() {
     int n;
     std::cin >> n;
-    // std::cin.ignore(); // חשוב לדלג על השורה הריקה אחרי הקריאה ל־n
+    std::cin.ignore();
     std::vector<Point> points(n);
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < n; i++) {
         std::string line;
         std::getline(std::cin, line);
-        std::replace(line.begin(), line.end(), ',', ' '); // מחליף פסיק ברווח
+        std::replace(line.begin(), line.end(), ',', ' '); 
         std::istringstream iss(line);
         iss >> points[i].x >> points[i].y;
     }

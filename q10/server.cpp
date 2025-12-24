@@ -9,7 +9,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include "..//q3/graph.hpp"
-#include "..//q8/proactor.hpp"
+#include "proactor.hpp"
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -44,9 +44,9 @@ void watcher_thread()
         cond.wait(lock); // wait for notification
 
         if (ch_above_100)
-            std::cout << "At Least 100 units belongs to CH\n";
+            std::cout << "CH is at Least 100 units\n";
         else
-            std::cout << "At Least 100 units no longer belongs to CH\n";
+            std::cout << "CH is less than 100 units\n";
     }
 }
 

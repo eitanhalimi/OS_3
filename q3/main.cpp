@@ -5,7 +5,7 @@
 #include <list>
 #include <vector>
 #include "../q2/Point.hpp"
-#include "graph.cpp" 
+#include "graph.hpp" 
 
 int main() {
     std::list<Point> points;

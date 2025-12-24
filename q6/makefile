@@ -1,19 +1,31 @@
-# Makefile for q6 server with reactor
-
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -pthread
+FLAGS = -Wall -g -std=c++20 -fPIC
+LIB_TARGET = libreactor.so
+EXEC_TARGET = server.out
+CLIENT_TARGET = client.out
+GRAPH_OBJ = ../q3/graph.o
 
-SRC = server.cpp ../q5/reactor.cpp ../q3/graph.cpp
-OBJ = $(SRC:.cpp=.o)
-TARGET = server_q6.out
+all: $(LIB_TARGET) $(EXEC_TARGET) $(CLIENT_TARGET)
 
-all: $(TARGET)
+$(LIB_TARGET): reactor.o
+	$(CXX) -shared $< -o $@
 
-$(TARGET): $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+reactor.o: reactor.cpp reactor.hpp
+	$(CXX) $(FLAGS) -c $< -o $@
 
-%.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(EXEC_TARGET): server.o reactor.o $(GRAPH_OBJ)
+	$(CXX) $(FLAGS) $^ -o $@
+
+$(CLIENT_TARGET): client.o
+	$(CXX) $(FLAGS) $^ -o $@
+
+server.o: server.cpp reactor.hpp ../q3/graph.hpp
+	$(CXX) $(FLAGS) -c $< -o $@
+
+client.o: client.cpp
+	$(CXX) $(FLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f *.o $(LIB_TARGET) $(EXEC_TARGET) $(CLIENT_TARGET) *.out
+
+.PHONY: all clean
